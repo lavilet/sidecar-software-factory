@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Run a credential-free installation and delivery check against temporary repositories."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+from tempfile import TemporaryDirectory
+
+root = Path(__file__).resolve().parents[1]
+ruby = subprocess.check_output([os.environ.get("FACTORY_RUBY", "ruby"), "-rrbconfig", "-e", "print RbConfig.ruby"], text=True)
+with TemporaryDirectory(prefix="factory smoke ") as tmp:
+    base = Path(tmp)
+    target = base / "one" / "sample"
+    shutil.copytree(root / "examples/status-page", target)
+    env = dict(os.environ, FACTORY_RUBY=ruby, FACTORY_STATE_DIR=str(base / "private profiles"),
+               PATH=str(root / "test/fixtures") + os.pathsep + os.environ["PATH"])
+
+    def run(*args, ok=True):
+        result = subprocess.run(args, cwd=target, env=env, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if (result.returncode == 0) != ok:
+            raise SystemExit(f"Unexpected status {result.returncode} from {args[0]}\n{result.stdout}")
+        return result.stdout.strip()
+
+    def factory(*args, project=target, ok=True):
+        return run(root / "bin/factory", "--project", project, *args, ok=ok)
+
+    run("git", "init", "-q", "-b", "trunk")
+    run("git", "add", ".")
+    run("git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "Add status page")
+    other = base / "two" / "sample"
+    run("git", "clone", "--quiet", str(target), str(other))
+
+    factory("init")
+    factory("init", project=other)
+    profile = Path(factory("profile"))
+    assert profile != Path(factory("profile", project=other))
+    marker = profile / "rules/canonical-files.md"
+    marker.write_text("The status page lives in index.html.\n")
+    factory("init")
+    assert marker.read_text().startswith("The status page lives")
+    factory("verify")
+    args = ("run", "--task", "status", "--brief", "Update the status message",
+            "--done-if", "The page says All systems ready.")
+    factory(*args, "--dry-run")
+    logs = profile / "runs/status"
+    assert json.loads((logs / "metrics.json").read_text())["status"] == "dry_run_ok"
+    factory(*args)
+    candidate = profile / "worktrees/status"
+    assert "All systems ready." in (candidate / "index.html").read_text()
+    assert "All systems operational." in (target / "index.html").read_text()
+    verdict = json.loads((logs / "review-r1-arbitrage.json").read_text())
+    assert verdict["approved"] and verdict["disagreement"] and len(verdict["verdicts"]) == 2
+    assert (logs / "arbiter-r1.json").is_file()
+    assert (logs / "pr-body.md").is_file()
+    factory(*args)
+    assert json.loads((logs / "metrics.json").read_text())["verify_loops"] == 0
+    (profile / "hooks/verify").write_text("#!/bin/sh\nexit 7\n")
+    factory("verify", ok=False)
+    factory(*args, "--dry-run", ok=False)
+    assert json.loads((logs / "metrics.json").read_text())["status"] == "verify_blocked"
+    assert not run("git", "status", "--porcelain")
+    print("PASS: profile isolation, setup, dry run, worker, verification, two reviews, arbitration, handoff, resume and failing gate")

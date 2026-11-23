@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessRetroReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "lessons",
+    "proposed_upgrades",
+    "eval_candidates"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Concise 2-4 sentence diagnosis of recurring failure modes and human edits."
+    },
+    "lessons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern", "evidence", "root_cause", "recommended_lever"],
+        "properties": {
+          "pattern": { "type": "string" },
+          "evidence": { "type": "string" },
+          "root_cause": { "type": "string" },
+          "recommended_lever": {
+            "type": "string",
+            "enum": [
+              "architecture_rule",
+              "lint_rule",
+              "verify_check",
+              "generator",
+              "ui_component",
+              "canonical_example",
+              "playbook_step",
+              "rule_add",
+              "rule_prune"
+            ]
+          }
+        }
+      }
+    },
+    "proposed_upgrades": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "At most 3 highest-leverage concrete improvements ordered from strongest deterministic lever to weakest.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "priority",
+          "lever",
+          "title",
+          "target_files",
+          "brief",
+          "done_if"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 3 },
+          "lever": {
+            "type": "string",
+            "enum": [
+              "architecture_rule",
+              "lint_rule",
+              "verify_check",
+              "generator",
+              "ui_component",
+              "canonical_example",
+              "playbook_step",
+              "rule_add",
+              "rule_prune"
+            ]
+          },
+          "title": { "type": "string" },
+          "target_files": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "brief": { "type": "string" },
+          "done_if": { "type": "string" }
+        }
+      }
+    },
+    "eval_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue_number", "reason", "suggested_spec_focus"],
+        "properties": {
+          "issue_number": { "type": "integer" },
+          "reason": { "type": "string" },
+          "suggested_spec_focus": { "type": "string" }
+        }
+      }
+    }
+  }
+}

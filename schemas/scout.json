@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessScoutReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "playbook",
+          "risk_level",
+          "title",
+          "evidence",
+          "brief",
+          "done_if"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "category": {
+            "type": "string",
+            "enum": ["architecture", "performance_security", "tests_ui_dx", "harness_efficiency"]
+          },
+          "playbook": {
+            "type": "string",
+            "enum": ["bugfix", "feature"]
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "title": { "type": "string" },
+          "evidence": {
+            "type": "string",
+            "description": "Exact file:line or telemetry evidence proving this issue is real."
+          },
+          "brief": { "type": "string" },
+          "done_if": { "type": "string" }
+        }
+      }
+    }
+  }
+}

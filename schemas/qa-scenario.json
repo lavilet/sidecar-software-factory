@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessQaScenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "viewports", "steps"],
+  "properties": {
+    "name": { "type": "string" },
+    "viewports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "width", "height"],
+        "properties": {
+          "name": { "type": "string" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "path", "selector", "text", "value", "key", "name", "ms"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "goto",
+              "click",
+              "fill",
+              "select",
+              "press",
+              "wait_selector",
+              "wait_text",
+              "wait_ms",
+              "expect_text",
+              "expect_no_text",
+              "expect_selector",
+              "screenshot"
+            ]
+          },
+          "path": { "type": ["string", "null"] },
+          "selector": { "type": ["string", "null"] },
+          "text": { "type": ["string", "null"] },
+          "value": { "type": ["string", "null"] },
+          "key": { "type": ["string", "null"] },
+          "name": { "type": ["string", "null"] },
+          "ms": { "type": ["integer", "null"] }
+        }
+      }
+    }
+  }
+}

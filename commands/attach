@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/session_store"
+
+options = { role: "worker", print_only: false }
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory attach <task-id> [--role worker|architect|reviewer] [--print]"
+  o.on("--role NAME", "Role session to attach to (default: worker)") { |v| options[:role] = v }
+  o.on("--print", "Print recorded sessions and takeover commands instead of launching") { options[:print_only] = true }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+task_id = ARGV[0] || abort("#{parser}\nMissing <task-id> (check profile runs/)")
+
+Harness::Paths.task!(task_id)
+artifacts_dir = File.join(Harness::Paths.profile(Dir.pwd), "runs", task_id)
+abort("Run directory not found: #{artifacts_dir}") unless Dir.exist?(artifacts_dir)
+
+store = Harness::SessionStore.new(artifacts_dir: artifacts_dir)
+list = store.entries
+
+if list.empty?
+  wt = File.join(Harness::Paths.profile(Dir.pwd), "worktrees", task_id)
+  abort("No recorded session IDs for #{task_id}. You can still open the worktree directly:\n  cd #{wt} && codex")
+end
+
+if options[:print_only]
+  list.each do |entry|
+    tokens = entry.dig("usage", "total_tokens") || 0
+    cost = entry["estimated_cost_usd"] || 0.0
+    puts "#{entry["stage"]} | backend=#{entry["backend"]} model=#{entry["model"]} tokens=#{tokens} ~$#{cost}"
+    puts "  #{entry["takeover_cmd"] || "(no session_id)"}"
+  end
+  exit 0
+end
+
+target = store.latest_for(role: options[:role]) || list.reverse.find { |e| e["takeover_cmd"] }
+abort("No resumable session found for role=#{options[:role]} in #{task_id}.") unless target && target["takeover_cmd"]
+
+puts "Attaching to #{target["stage"]} (#{target["backend"]}:#{target["model"]})..."
+puts "Running: #{target["takeover_cmd"]}"
+argv = Harness::SessionStore.takeover_argv(target.fetch("backend"), target.fetch("session_id"))
+abort "Unsupported backend" unless argv
+Dir.chdir(target.fetch("worktree_dir"))
+exec(*argv)

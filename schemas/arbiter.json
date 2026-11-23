@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessArbiterVerdict",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approved",
+    "done_if_met",
+    "summary",
+    "ruled_findings",
+    "architecture_violations",
+    "blocking_issues",
+    "dismissed_notes"
+  ],
+  "properties": {
+    "approved": {
+      "type": "boolean",
+      "description": "True ONLY when done_if_met is true and both upheld architecture_violations and upheld blocking_issues are empty."
+    },
+    "done_if_met": {
+      "type": "boolean",
+      "description": "Independent judgment on whether done_if is satisfied based on the diff, verify gate, and QA evidence."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Concise 2-3 sentence adjudication explaining what was upheld vs dismissed."
+    },
+    "ruled_findings": {
+      "type": "array",
+      "description": "Every distinct issue raised by either reviewer, adjudicated with classification, probability, and risk.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_reviewer",
+          "file",
+          "claim",
+          "verdict",
+          "severity",
+          "probability",
+          "risk",
+          "reasoning",
+          "fix_hint"
+        ],
+        "properties": {
+          "source_reviewer": { "type": "string" },
+          "file": { "type": "string" },
+          "claim": { "type": "string" },
+          "verdict": {
+            "type": "string",
+            "enum": ["architecture_violation", "valid_blocker", "nitpick", "false_positive"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"]
+          },
+          "probability": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "reasoning": { "type": "string" },
+          "fix_hint": { "type": "string" }
+        }
+      }
+    },
+    "architecture_violations": {
+      "type": "array",
+      "description": "Upheld real architecture violations that MUST be fixed.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "rule", "explanation", "source_reviewer", "severity", "risk"],
+        "properties": {
+          "file": { "type": "string" },
+          "rule": { "type": "string" },
+          "explanation": { "type": "string" },
+          "source_reviewer": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "risk": { "type": "string", "enum": ["high", "medium", "low"] }
+        }
+      }
+    },
+    "blocking_issues": {
+      "type": "array",
+      "description": "Upheld real bugs, missing tests, or unmet done_if requirements that MUST be fixed (exclude nitpicks and false positives).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "issue", "fix_hint", "source_reviewer", "severity", "probability", "risk"],
+        "properties": {
+          "file": { "type": "string" },
+          "issue": { "type": "string" },
+          "fix_hint": { "type": "string" },
+          "source_reviewer": { "type": "string" },
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+          "probability": { "type": "string", "enum": ["high", "medium", "low"] },
+          "risk": { "type": "string", "enum": ["high", "medium", "low"] }
+        }
+      }
+    },
+    "dismissed_notes": {
+      "type": "array",
+      "description": "Nitpicks or false positives dismissed as non-blocking, with brief justification.",
+      "items": { "type": "string" }
+    }
+  }
+}

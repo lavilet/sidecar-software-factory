@@ -1,0 +1,29 @@
+{
+  "name": "Home page",
+  "viewports": [
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 800
+    }
+  ],
+  "steps": [
+    {
+      "action": "goto",
+      "path": "/"
+    },
+    {
+      "action": "expect_selector",
+      "selector": "body"
+    },
+    {
+      "action": "screenshot",
+      "name": "home"
+    }
+  ]
+}

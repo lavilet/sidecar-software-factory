@@ -1,0 +1,29 @@
+# Use backend or backend:model. A bare backend uses its local default model.
+[roles]
+router = "codex"
+architect = "codex"
+worker = "codex"
+reviewers = "codex,codex"
+arbiter = "codex"
+qa = "codex"
+retro = "codex"
+scout = "codex"
+
+[efforts]
+router = "low"
+architect = "high"
+worker = "medium"
+reviewer = "medium"
+arbiter = "high"
+qa = "low"
+retro = "medium"
+scout = "low"
+
+# Optional alert thresholds. Runs continue when the threshold is exceeded.
+[budgets]
+max_tokens_per_run = 600000
+
+# USD per million input, cached input and output tokens, in that order.
+# Set your provider's rates to enable monetary estimates.
+[pricing]
+default = "0,0,0"

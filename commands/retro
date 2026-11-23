@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "json"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/errors"
+require "harness/config_file"
+require "harness/cost_estimator"
+require "harness/session_store"
+require "harness/logger"
+require "harness/telemetry"
+require "harness/workspace"
+require "harness/prompts"
+require "harness/handoff"
+require "harness/backends/base"
+require "harness/backends/codex"
+require "harness/backends/antigravity"
+require "harness/backends/gemini"
+require "harness/arbitrage_reviewer"
+require "harness/verifier"
+require "harness/qa"
+require "harness/runner"
+require "harness/issue_store"
+require "harness/retro"
+
+repo_root = Dir.pwd
+cfg = Harness::ConfigFile.load(repo_root)
+options = {
+  backend_spec: cfg.role("retro"),
+  base_branch: Harness::Paths.base_branch(repo_root),
+  architect_spec: cfg.role("architect"),
+  worker_spec: cfg.role("worker"),
+  reviewer_specs: cfg.reviewer_specs,
+  qa_spec: cfg.role("qa"),
+  include_all_merged: false,
+  propose_pr: false,
+  dry_run: false
+}
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory retro [options]"
+  o.on("--backend SPEC", "Backend[:model] for Retro analysis (default: profile setting)") { |v| options[:backend_spec] = v }
+  o.on("--all", "Re-analyze all merged PRs instead of only unprocessed ones") { options[:include_all_merged] = true }
+  o.on("--propose-pr", "Open a Draft PR implementing the #1 highest-leverage upgrade via factory run") { options[:propose_pr] = true }
+  o.on("--base BRANCH", "Base branch for proposed upgrade PR (default: target base branch)") { |v| options[:base_branch] = v }
+  o.on("--dry-run", "Write retro prompt without calling LLM") { options[:dry_run] = true }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+
+logger = Harness::Logger.new(File.join(Harness::Paths.profile(repo_root), "runs", "retro.log"))
+store = Harness::IssueStore.new(repo_root: repo_root)
+parsed = Harness::Backends.parse_spec(options[:backend_spec])
+backend = Harness::Backends.build(parsed.backend, logger: logger, repo_root: repo_root)
+
+upgrade_runner = lambda do |upgrade|
+  task_id = "retro-#{upgrade["id"].to_s.gsub(/[^a-zA-Z0-9_-]+/, "-")}"
+  config = Harness::Config.new(
+    task_id: task_id,
+    playbook: "feature",
+    brief: "[Harness Self-Improvement: #{upgrade["lever"]}] #{upgrade["title"]}\n\n#{upgrade["brief"]}",
+    done_if: upgrade["done_if"],
+    base_branch: options[:base_branch],
+    backend: options[:worker_spec],
+    model: nil,
+    architect_spec: options[:architect_spec],
+    worker_spec: options[:worker_spec],
+    reviewer_specs: options[:reviewer_specs],
+    qa_spec: options[:qa_spec],
+    max_verify_loops: 3,
+    max_review_loops: 2,
+    skip_architect: false,
+    skip_review: false,
+    run_qa: false,
+    qa_scenario: nil,
+    upload_evidence: false,
+    open_pr: true,
+    push_only: false,
+    dry_run: false
+  )
+
+  Harness::Runner.new(config, repo_root: repo_root).run
+  metrics = JSON.parse(File.read(File.join(Harness::Paths.profile(repo_root), "runs", task_id, "metrics.json")))
+  metrics["pr_url"]
+end
+
+retro = Harness::Retro.new(
+  repo_root: repo_root,
+  store: store,
+  backend: backend,
+  model: parsed.model,
+  reasoning_effort: cfg.effort("retro"),
+  logger: logger,
+  upgrade_runner: upgrade_runner
+)
+
+retro.call(
+  include_all_merged: options[:include_all_merged],
+  propose_pr: options[:propose_pr],
+  dry_run: options[:dry_run]
+)

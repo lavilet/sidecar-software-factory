@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Create or update the GitHub labels used by factory bot.
+set -euo pipefail
+
+declare -a LABELS=(
+  "agent:epic|0052cc|Parent initiative / epic providing shared context for child tasks"
+  "agent:triage|1d76db|Raw issue awaiting Harness Router triage"
+  "agent:needs-info|fbca04|Router needs human answers or AC confirmation"
+  "agent:waiting-deps|bfdadc|Approved child task waiting for Depends on issues to close"
+  "agent:ready|0e8a16|Approved AC contract ready for autonomous execution"
+  "agent:in-progress|5319e7|Harness worker is executing in an isolated worktree"
+  "agent:review|006b75|Draft PR open and monitored for submitted review comments"
+  "agent:blocked|d93f0b|Harness hit retry limit and requires human intervention"
+  "agent:merged|6f42c1|PR merged and queued for post-merge Harness Retro"
+)
+
+for entry in "${LABELS[@]}"; do
+  IFS="|" read -r name color desc <<< "$entry"
+  echo "Syncing label: ${name}"
+  gh label create "$name" --color "$color" --description "$desc" --force
+done
+
+echo "All agent:* labels are ready."

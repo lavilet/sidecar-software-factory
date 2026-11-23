@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+class Heading(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_heading = False
+        self.text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "h1":
+            self.in_heading = True
+
+    def handle_endtag(self, tag):
+        if tag == "h1":
+            self.in_heading = False
+
+    def handle_data(self, data):
+        if self.in_heading:
+            self.text.append(data)
+
+
+heading = Heading()
+heading.feed(Path("index.html").read_text())
+if heading.text != ["Service status"]:
+    raise SystemExit("Expected one Service status heading")
+print("Status page heading passed")

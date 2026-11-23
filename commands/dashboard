@@ -1,0 +1,24 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/dashboard"
+
+options = { host: "127.0.0.1", port: 4127 }
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory dashboard [--host 127.0.0.1] [--port 4127]"
+  o.on("--host HOST", "Bind host (default: 127.0.0.1)") { |v| options[:host] = v }
+  o.on("--port PORT", Integer, "Port (default: 4127)") { |v| options[:port] = v }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+
+Harness::Dashboard.new(repo_root: Dir.pwd, host: options[:host], port: options[:port]).serve!

@@ -1,0 +1,4 @@
+# Git-style paths matched with Ruby File.fnmatch and FNM_PATHNAME.
+.github/workflows/**/*
+**/migrations/**/*
+**/billing/**/*

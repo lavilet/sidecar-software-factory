@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HarnessTriageContract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "playbook",
+    "ready_to_execute",
+    "risk_level",
+    "affected_layers",
+    "acceptance_criteria",
+    "done_if",
+    "needs_qa_demo",
+    "qa_reason",
+    "missing_questions",
+    "rationale"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "bug",
+        "feature",
+        "refactor",
+        "ui",
+        "chore"
+      ]
+    },
+    "playbook": {
+      "type": "string",
+      "enum": [
+        "bugfix",
+        "feature"
+      ]
+    },
+    "ready_to_execute": {
+      "type": "boolean",
+      "description": "True only when requirements are unambiguous enough to implement and test without guessing."
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Use high for migrations, authentication, sessions, payments, billing, or deploy config."
+    },
+    "affected_layers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "criterion",
+          "verification_method"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "criterion": {
+            "type": "string"
+          },
+          "verification_method": {
+            "type": "string",
+            "enum": [
+              "unit_test",
+              "integration_test",
+              "end_to_end_test",
+              "static_check",
+              "manual_check"
+            ]
+          }
+        }
+      }
+    },
+    "done_if": {
+      "type": "string",
+      "description": "Single concrete, verifiable stop condition."
+    },
+    "needs_qa_demo": {
+      "type": "boolean",
+      "description": "True when a browser demo can verify user-visible behavior."
+    },
+    "qa_reason": {
+      "type": "string",
+      "description": "One-sentence explanation of why browser QA demo is or is not needed."
+    },
+    "missing_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rationale": {
+      "type": "string"
+    }
+  }
+}

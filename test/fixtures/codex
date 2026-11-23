@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Scripted CLI double used by the offline smoke test."""
+import json
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+prompt = sys.stdin.read()
+output = Path(args[args.index("-o") + 1])
+if "--output-schema" in args:
+    schema = Path(args[args.index("--output-schema") + 1]).stem
+    review = {
+        "approved": True, "done_if_met": True, "summary": "Fixture change is present.",
+        "blocking_issues": [], "architecture_violations": []
+    }
+    if schema == "review":
+        review["non_blocking_notes"] = []
+        if "-2-codex" in output.name:
+            review.update(approved=False, blocking_issues=[{
+                "file": "index.html", "issue": "The old message may remain.", "fix_hint": "Check the visible text."
+            }])
+    elif schema == "arbiter":
+        review["ruled_findings"] = []
+        review["dismissed_notes"] = ["The old message is absent from the candidate."]
+    else:
+        raise SystemExit(f"Unexpected role schema: {schema}")
+    text = json.dumps(review)
+elif "acting as ARCHITECT" in prompt:
+    text = "Update the status page and run its check."
+elif "acting as WORKER" in prompt or "Continue working" in prompt:
+    page = Path("index.html")
+    page.write_text(page.read_text().replace("All systems operational.", "All systems ready."))
+    text = "Updated the status message."
+else:
+    raise SystemExit("Unexpected fixture prompt")
+
+output.write_text(text)
+print(json.dumps({"type": "thread.started", "thread_id": "offline-session"}))
+print(json.dumps({"type": "turn.completed", "usage": {}}))

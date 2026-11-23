@@ -1,0 +1,73 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "json"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/errors"
+require "harness/config_file"
+require "harness/logger"
+require "harness/backends/base"
+require "harness/backends/codex"
+require "harness/backends/antigravity"
+require "harness/backends/gemini"
+require "harness/github"
+require "harness/epic_splitter"
+
+repo_root = Dir.pwd
+cfg = Harness::ConfigFile.load(repo_root)
+
+options = {
+  backend_spec: cfg.role("router"),
+  create: false,
+  pilot_only: false,
+  label: "agent:triage"
+}
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory split-epic <epic-issue-number> [options]"
+  o.on("--backend SPEC", "Backend[:model] for parsing the Epic (default: router role)") { |v| options[:backend_spec] = v }
+  o.on("--create", "Actually create child GitHub issues with Parent:/Depends on:/Pilot: headers") { options[:create] = true }
+  o.on("--pilot-only", "With --create, create ONLY the pilot child issue first") { options[:pilot_only] = true }
+  o.on("--label LABEL", "Initial label for dependency-free children (default: agent:triage)") { |v| options[:label] = v }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+epic_number = ARGV[0]&.to_i
+abort("#{parser}\nProvide an Epic issue number (e.g. factory split-epic 41)") if epic_number.nil? || epic_number <= 0
+
+logger = Harness::Logger.new(File.join(Harness::Paths.profile(repo_root), "runs", "split-epic.log"))
+github = Harness::GitHub.new(repo_root: repo_root)
+parsed = Harness::Backends.parse_spec(options[:backend_spec])
+backend = Harness::Backends.build(parsed.backend, logger: logger, repo_root: repo_root)
+
+splitter = Harness::EpicSplitter.new(
+  repo_root: repo_root,
+  github: github,
+  backend: backend,
+  model: parsed.model,
+  reasoning_effort: cfg.effort("router"),
+  logger: logger
+)
+
+split_plan = splitter.plan(epic_number: epic_number)
+
+unless options[:create]
+  puts JSON.pretty_generate(split_plan)
+  puts "\nDry-run preview only. Pass --pilot-only --create (or --create) when ready to create GitHub issues."
+  exit 0
+end
+
+created = splitter.create_children(
+  split_plan: split_plan,
+  epic_number: epic_number,
+  pilot_only: options[:pilot_only],
+  initial_label: options[:label]
+)
+puts JSON.pretty_generate(created)

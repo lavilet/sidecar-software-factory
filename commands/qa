@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "timeout"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/errors"
+require "harness/logger"
+require "harness/qa"
+
+repo_root = Dir.pwd
+options = {
+  scenario: File.join(Harness::Paths.profile(repo_root), "qa", "default.json"),
+  worktree: repo_root,
+  out_dir: File.join(Harness::Paths.profile(repo_root), "runs", "qa-manual"),
+  upload_evidence: false,
+  task_id: "qa-manual"
+}
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory qa [options]"
+  o.on("--scenario PATH", "Path to QA scenario JSON (default: profile qa/default.json)") { |v| options[:scenario] = v }
+  o.on("--root DIR", "Repository or worktree directory to boot (default: current dir)") { |v| options[:worktree] = v }
+  o.on("--out DIR", "Output directory for qa/ videos, screenshots, and qa-report.json") { |v| options[:out_dir] = v }
+  o.on("--task ID", "Task ID used when uploading evidence") { |v| options[:task_id] = v }
+  o.on("--upload-evidence", "Upload recorded videos/screenshots to orphan branch harness-evidence") { options[:upload_evidence] = true }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+
+logger = Harness::Logger.new(File.join(options[:out_dir], "qa.log"))
+qa = Harness::Qa.new(
+  repo_root: repo_root,
+  worktree_dir: options[:worktree],
+  artifacts_dir: options[:out_dir],
+  logger: logger
+)
+
+report = qa.run(
+  scenario_path: options[:scenario],
+  upload_evidence: options[:upload_evidence],
+  task_id: options[:task_id]
+)
+
+puts Harness::Qa.format_pr_section(report)

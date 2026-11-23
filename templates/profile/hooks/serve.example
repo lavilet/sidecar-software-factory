@@ -1,0 +1,4 @@
+#!/bin/sh
+# For a static site. Copy to hooks/serve and make it executable after checking the target.
+set -eu
+exec python3 -m http.server "$PORT" --bind 127.0.0.1

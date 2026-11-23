@@ -1,0 +1,187 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "open3"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/errors"
+require "harness/config_file"
+require "harness/cost_estimator"
+require "harness/session_store"
+require "harness/logger"
+require "harness/telemetry"
+require "harness/workspace"
+require "harness/prompts"
+require "harness/handoff"
+require "harness/backends/base"
+require "harness/backends/codex"
+require "harness/backends/antigravity"
+require "harness/backends/gemini"
+require "harness/arbitrage_reviewer"
+require "harness/verifier"
+require "harness/qa"
+require "harness/runner"
+require "harness/github"
+require "harness/epic_parser"
+require "harness/issue_store"
+require "harness/router"
+require "harness/retro"
+require "harness/bot"
+
+repo_root = Dir.pwd
+cfg = Harness::ConfigFile.load(repo_root)
+
+options = {
+  base_branch: Harness::Paths.base_branch(repo_root),
+  router_spec: cfg.role("router"),
+  architect_spec: cfg.role("architect"),
+  worker_spec: cfg.role("worker"),
+  reviewer_specs: cfg.reviewer_specs,
+  qa_spec: cfg.role("qa"),
+  retro_spec: cfg.role("retro"),
+  auto_approve: false,
+  auto_retro: false,
+  force_qa: false,
+  upload_evidence: false,
+  open_pr: true,
+  dry_run: false,
+  loop_mode: false,
+  interval_sec: 120
+}
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory bot [options]"
+  o.on("--base BRANCH", "Base branch for PRs (default: target base branch)") { |v| options[:base_branch] = v }
+  o.on("--router SPEC", "Backend[:model] for Router / triage") { |v| options[:router_spec] = v }
+  o.on("--architect SPEC", "Backend[:model] for Architect") { |v| options[:architect_spec] = v }
+  o.on("--worker SPEC", "Backend[:model] for Worker") { |v| options[:worker_spec] = v }
+  o.on("--qa-planner SPEC", "Backend[:model] for QA scenario planner") { |v| options[:qa_spec] = v }
+  o.on("--retro-backend SPEC", "Backend[:model] for post-merge Retro") { |v| options[:retro_spec] = v }
+  o.on("--reviewers LIST", "Comma-separated reviewer specs for arbitrage review") do |v|
+    options[:reviewer_specs] = v.split(",").map(&:strip).reject(&:empty?)
+  end
+  o.on("--auto-approve", "Auto-advance low/medium risk ready issues to agent:ready") { options[:auto_approve] = true }
+  o.on("--auto-retro", "Run post-merge Harness Retro automatically whenever a PR merges") { options[:auto_retro] = true }
+  o.on("--qa", "Always record browser QA demo videos (default: Router decides per issue via needs_qa_demo)") { options[:force_qa] = true }
+  o.on("--upload-evidence", "Upload QA videos/screenshots to orphan branch harness-evidence when QA runs") { options[:upload_evidence] = true }
+  o.on("--no-pr", "Run locally without pushing or creating PRs") { options[:open_pr] = false }
+  o.on("--loop", "Poll continuously instead of a single tick") { options[:loop_mode] = true }
+  o.on("--interval SEC", Integer, "Seconds between ticks in --loop mode (default: 120)") { |v| options[:interval_sec] = v }
+  o.on("--dry-run", "Inspect GitHub state without running LLMs or editing labels") { options[:dry_run] = true }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+
+logger = Harness::Logger.new(File.join(Harness::Paths.profile(repo_root), "runs", "bot.log"))
+telemetry = Harness::Telemetry.new(File.join(Harness::Paths.profile(repo_root), "runs", "telemetry.jsonl"))
+github = Harness::GitHub.new(repo_root: repo_root)
+store = Harness::IssueStore.new(repo_root: repo_root)
+
+router_spec = Harness::Backends.parse_spec(options[:router_spec])
+router_backend = Harness::Backends.build(router_spec.backend, logger: logger, repo_root: repo_root)
+router = Harness::Router.new(
+  repo_root: repo_root,
+  backend: router_backend,
+  model: router_spec.model,
+  reasoning_effort: cfg.effort("router"),
+  logger: logger
+)
+
+runner_factory = lambda do |task_id:, playbook:, brief:, done_if:, base_branch:, open_pr:, push_only:, skip_architect:,
+  run_qa: false, upload_evidence: false|
+  config = Harness::Config.new(
+    task_id: task_id,
+    playbook: playbook,
+    brief: brief,
+    done_if: done_if,
+    base_branch: base_branch,
+    backend: options[:worker_spec],
+    model: nil,
+    architect_spec: options[:architect_spec],
+    worker_spec: options[:worker_spec],
+    reviewer_specs: options[:reviewer_specs],
+    qa_spec: options[:qa_spec],
+    max_verify_loops: 3,
+    max_review_loops: 2,
+    skip_architect: skip_architect,
+    skip_review: false,
+    run_qa: run_qa,
+    qa_scenario: nil,
+    upload_evidence: upload_evidence,
+    open_pr: open_pr,
+    push_only: push_only,
+    dry_run: false
+  )
+
+  Harness::Runner.new(config, repo_root: repo_root).run
+  metrics_path = File.join(Harness::Paths.profile(repo_root), "runs", task_id, "metrics.json")
+  metrics = JSON.parse(File.read(metrics_path))
+  {
+    pr_url: metrics["pr_url"],
+    head_sha: metrics["head_sha"],
+    review_escalated: metrics["review_escalated"] == true
+  }
+end
+
+on_merge = lambda do |_issue_number, pilot: false|
+  next unless options[:auto_retro] || pilot
+
+  retro_spec = Harness::Backends.parse_spec(options[:retro_spec])
+  retro_backend = Harness::Backends.build(retro_spec.backend, logger: logger, repo_root: repo_root)
+  retro = Harness::Retro.new(
+    repo_root: repo_root,
+    store: store,
+    backend: retro_backend,
+    model: retro_spec.model,
+    reasoning_effort: cfg.effort("retro"),
+    logger: logger
+  )
+  retro.call(propose_pr: false, create_issues: true, max_issues: 2, dry_run: options[:dry_run])
+end
+
+bot = Harness::Bot.new(
+  repo_root: repo_root,
+  github: github,
+  store: store,
+  router: router,
+  logger: logger,
+  telemetry: telemetry,
+  runner_factory: runner_factory,
+  base_branch: options[:base_branch],
+  auto_approve: options[:auto_approve],
+  open_pr: options[:open_pr],
+  dry_run: options[:dry_run],
+  on_merge: on_merge,
+  force_qa: options[:force_qa],
+  upload_evidence: options[:upload_evidence]
+)
+
+logger.info(
+  "BOT",
+  "Started (base=#{options[:base_branch]} router=#{options[:router_spec]} architect=#{options[:architect_spec]} " \
+  "worker=#{options[:worker_spec]} qa=#{options[:qa_spec]} retro=#{options[:retro_spec]} " \
+  "reviewers=[#{options[:reviewer_specs].join(", ")}] auto_approve=#{options[:auto_approve]} " \
+  "auto_retro=#{options[:auto_retro]} force_qa=#{options[:force_qa]} upload_evidence=#{options[:upload_evidence]} " \
+  "loop=#{options[:loop_mode]} interval=#{options[:interval_sec]}s)"
+)
+
+bot.recover_orphaned_in_progress!
+
+loop do
+  begin
+    bot.tick!
+  rescue Harness::Error => error
+    logger.info("BOT", "Tick error (will retry next cycle): #{error.message}")
+  end
+
+  break unless options[:loop_mode]
+
+  logger.info("BOT", "Idle. Next poll in #{options[:interval_sec]}s...")
+  sleep(options[:interval_sec])
+end

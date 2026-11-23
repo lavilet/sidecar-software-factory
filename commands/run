@@ -1,0 +1,103 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require "open3"
+
+HARNESS_LIB = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(HARNESS_LIB)
+
+require "harness/errors"
+require "harness/config_file"
+require "harness/cost_estimator"
+require "harness/session_store"
+require "harness/logger"
+require "harness/telemetry"
+require "harness/workspace"
+require "harness/prompts"
+require "harness/handoff"
+require "harness/backends/base"
+require "harness/backends/codex"
+require "harness/backends/antigravity"
+require "harness/backends/gemini"
+require "harness/arbitrage_reviewer"
+require "harness/verifier"
+require "harness/qa"
+require "harness/runner"
+
+def current_branch
+  out, status = Open3.capture2e("git", "branch", "--show-current")
+  branch = status.success? ? out.strip : ""
+  branch.empty? ? "main" : branch
+end
+
+cfg = Harness::ConfigFile.load(Dir.pwd)
+
+options = {
+  playbook: "feature",
+  base_branch: current_branch,
+  backend: cfg.role("worker"),
+  model: nil,
+  architect_spec: cfg.role("architect"),
+  worker_spec: cfg.role("worker"),
+  reviewer_specs: cfg.reviewer_specs,
+  qa_spec: cfg.role("qa"),
+  max_verify_loops: 3,
+  max_review_loops: 2,
+  skip_architect: false,
+  skip_review: false,
+  run_qa: false,
+  qa_scenario: nil,
+  upload_evidence: false,
+  open_pr: false,
+  push_only: false,
+  dry_run: false,
+  fresh: false
+}
+
+parser = OptionParser.new do |o|
+  o.banner = "Usage: factory run --task ID --brief TEXT --done-if TEXT [options]"
+  o.on("--task ID", "Unique task identifier (e.g. parser-fix-1)") { |v| options[:task_id] = v }
+  o.on("--playbook NAME", "Playbook name from profile playbooks/ (default: feature)") { |v| options[:playbook] = v }
+  o.on("--brief TEXT", "Task description") { |v| options[:brief] = v }
+  o.on("--done-if TEXT", "Verifiable stop condition") { |v| options[:done_if] = v }
+  o.on("--base BRANCH", "Base branch for worktree (default: current branch)") { |v| options[:base_branch] = v }
+  o.on("--backend SPEC", "Default backend[:model] (codex | antigravity | gemini)") do |v|
+    options[:backend] = v
+    options[:architect_spec] = v
+    options[:worker_spec] = v
+  end
+  o.on("--architect SPEC", "Backend[:model] for Architect stage") { |v| options[:architect_spec] = v }
+  o.on("--worker SPEC", "Backend[:model] for Worker stage") { |v| options[:worker_spec] = v }
+  o.on("--qa-planner SPEC", "Backend[:model] for QA scenario planner (default: from profile config.toml)") { |v| options[:qa_spec] = v }
+  o.on("--reviewers LIST", "Comma-separated reviewer specs for arbitrage review") do |v|
+    options[:reviewer_specs] = v.split(",").map(&:strip).reject(&:empty?)
+  end
+  o.on("--model NAME", "Optional default model override passed to backends without :model") { |v| options[:model] = v }
+  o.on("--verify-loops N", Integer, "Max worker+verify attempts per round (default: 3)") { |v| options[:max_verify_loops] = v }
+  o.on("--review-loops N", Integer, "Max arbitrage review rounds (default: 2)") { |v| options[:max_review_loops] = v }
+  o.on("--skip-architect", "Skip read-only Architect stage") { options[:skip_architect] = true }
+  o.on("--skip-review", "Skip read-only Arbitrage Reviewer stage") { options[:skip_review] = true }
+  o.on("--qa", "Record mobile + desktop Playwright QA demo video & screenshots before handoff") { options[:run_qa] = true }
+  o.on("--qa-scenario PATH", "Explicit QA scenario JSON (if omitted with --qa, planned from diff)") { |v| options[:qa_scenario] = v }
+  o.on("--upload-evidence", "Upload QA videos/screenshots to orphan branch harness-evidence for PR playback") { options[:upload_evidence] = true }
+  o.on("--pr", "Commit, push branch, and open Draft PR via gh (default: local-only)") { options[:open_pr] = true }
+  o.on("--push-only", "Commit and push to existing PR branch without creating a new PR") { options[:push_only] = true }
+  o.on("--dry-run", "Create worktree, write prompts, run verify, write pr-body.md without calling LLM") { options[:dry_run] = true }
+  o.on("--fresh", "Ignore saved stage checkpoints and run all stages from scratch") { options[:fresh] = true }
+  o.on("-h", "--help", "Show help") do
+    puts o
+    exit 0
+  end
+end
+
+parser.parse!
+
+missing = %i[ task_id brief done_if ].select { |key| options[key].nil? || options[key].strip.empty? }
+unless missing.empty?
+  abort("#{parser}\nMissing required options: #{missing.join(", ")}")
+end
+
+abort "Loop counts must be positive" unless options.values_at(:max_verify_loops, :max_review_loops).all?(&:positive?)
+fresh = options.delete(:fresh)
+config = Harness::Config.new(**options)
+Harness::Runner.new(config, fresh: fresh).run
